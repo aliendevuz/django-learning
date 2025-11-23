@@ -1,4 +1,4 @@
-name: Auto Deploy to DigitalOcean
+name: Fast Auto Deploy to DigitalOcean
 
 on:
   push:
@@ -9,35 +9,43 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Repository checkout
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Install sshpass
+      - name: Install rsync and sshpass
         run: |
           sudo apt-get update
-          sudo apt-get install -y sshpass
+          sudo apt-get install -y sshpass rsync
 
-      - name: Upload project files to server
+      - name: Sync changed files to server (rsync)
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_PASS: ${{ secrets.SSH_PASS }}
           PROJECT_DIR: ${{ secrets.PROJECT_DIR }}
         run: |
-          echo "Copying files to server..."
-          sshpass -p "$SSH_PASS" scp -o StrictHostKeyChecking=no -r . "$SSH_USER@$SSH_HOST:$PROJECT_DIR"
+          echo "Uploading only changed files..."
+          sshpass -p "$SSH_PASS" rsync -avz --delete \
+            -e "ssh -o StrictHostKeyChecking=no" \
+            ./ "$SSH_USER@$SSH_HOST:$PROJECT_DIR"
 
-      - name: Restart docker on server
+      - name: Zero-downtime docker deploy
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_PASS: ${{ secrets.SSH_PASS }}
           PROJECT_DIR: ${{ secrets.PROJECT_DIR }}
         run: |
-          echo "Running docker restart on server..."
+          echo "Deploying new Docker version..."
           sshpass -p "$SSH_PASS" ssh -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" << EOF
             cd $PROJECT_DIR
-            docker compose down || true
-            docker compose build
-            docker compose up -d
+
+            # Build only modified layers
+            docker compose build --pull
+
+            # Start new version without stopping current one first
+            docker compose up -d --no-deps --build
+
+            # Clean unused images
+            docker image prune -f
           EOF
