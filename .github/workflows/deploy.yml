@@ -12,29 +12,32 @@ jobs:
       - name: Repository checkout
         uses: actions/checkout@v3
 
-      - name: Send project files to server via SSH
+      - name: Install sshpass
         run: |
           sudo apt-get update
           sudo apt-get install -y sshpass
-          
-          sshpass -p "$SSH_PASS" scp -o StrictHostKeyChecking=no -r . $SSH_USER@$SSH_HOST:$PROJECT_DIR
 
-      - name: Restart Docker container on server
-        run: |
-          sshpass -p "$SSH_PASS" ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST << 'EOF'
-            cd $PROJECT_DIR
-
-            echo "Stopping old containers..."
-            docker compose down || true
-
-            echo "Building new version..."
-            docker compose build
-
-            echo "Starting new version..."
-            docker compose up -d
-          EOF
+      - name: Upload project files to server
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_PASS: ${{ secrets.SSH_PASS }}
           PROJECT_DIR: ${{ secrets.PROJECT_DIR }}
+        run: |
+          echo "Copying files to server..."
+          sshpass -p "$SSH_PASS" scp -o StrictHostKeyChecking=no -r . "$SSH_USER@$SSH_HOST:$PROJECT_DIR"
+
+      - name: Restart docker on server
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PASS: ${{ secrets.SSH_PASS }}
+          PROJECT_DIR: ${{ secrets.PROJECT_DIR }}
+        run: |
+          echo "Running docker restart on server..."
+          sshpass -p "$SSH_PASS" ssh -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" << EOF
+            cd $PROJECT_DIR
+            docker compose down || true
+            docker compose build
+            docker compose up -d
+          EOF
